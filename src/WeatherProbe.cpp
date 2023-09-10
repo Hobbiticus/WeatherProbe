@@ -24,10 +24,13 @@ Adafruit_BME280 bme; // I2C, 22 = SCL, 21 = SDA
 
 
 const unsigned int CO2Period = 1000 * 60 * 15;
+const unsigned int PMSPeriod = 1000 * 60;
+const unsigned int PMSStabalizeTimeOffsetMS = 5;
 
 unsigned int NextCO2ReadingTimeMS = 0;
 int LastCO2Reading = -1;
-int NextPMReadingTime = 0;
+unsigned int NextPMSReadingTimeMS = 0;
+unsigned int PMSStabalizeTimeMS = 0;
 
 void setup()
 {
@@ -42,7 +45,9 @@ void setup()
   digitalWrite(CO2_SWITCH, HIGH);
   digitalWrite(PMS_SWITCH, HIGH);
   NextCO2ReadingTimeMS = millis();
+  NextPMSReadingTimeMS = millis();
   co2.ResetPreheatTime();
+  PMSStabalizeTimeMS = millis() + PMSStabalizeTimeOffsetMS;
 
   Serial.println("Starting pms...");
   pms.init();
@@ -69,10 +74,12 @@ void setup()
 }
 
 bool CO2Heating = true;
+bool PMSStabalizing = true;
+
 void loop()
 {
   //do CO2 things...
-  if (millis() > NextCO2ReadingTimeMS)
+  if (millis() - NextCO2ReadingTimeMS < 0x7FFFFFFF)
   {
     if (!CO2Heating)
     {
@@ -85,8 +92,61 @@ void loop()
       LastCO2Reading = co2.GetCO2();
       Serial.printf("co2 = %d\n", LastCO2Reading);
       NextCO2ReadingTimeMS += CO2Period;
-      //TODO: do something here to output the new co2 reading
       digitalWrite(CO2_SWITCH, LOW);
+    }
+  }
+
+  //do PMS things...
+  if (millis() - NextPMSReadingTimeMS > 0x7FFFFFFF)
+  {
+    if (!PMSStabalizing)
+    {
+      PMSStabalizeTimeMS = millis() + PMSStabalizeTimeOffsetMS;
+      digitalWrite(PMS_SWITCH, HIGH);
+      PMSStabalizing = true;
+    }
+    if (millis() - PMSStabalizeTimeMS < 0x7FFFFFFF)
+    {
+      pms.read();
+      if (pms)
+      {
+        Serial.printf("PM1.0 %hu, PM2.5 %hu, PM10 %hu [ug/m3]\n", pms.pm01, pms.pm25, pms.pm10);
+      }
+      else
+      {
+        Serial.println("Failed to read");
+        switch (pms.status)
+        {
+        case pms.OK: // should never come here
+          break;     // included to compile without warnings
+        case pms.ERROR_TIMEOUT:
+          Serial.println(F(PMS_ERROR_TIMEOUT));
+          break;
+        case pms.ERROR_MSG_UNKNOWN:
+          Serial.println(F(PMS_ERROR_MSG_UNKNOWN));
+          break;
+        case pms.ERROR_MSG_HEADER:
+          Serial.println(F(PMS_ERROR_MSG_HEADER));
+          break;
+        case pms.ERROR_MSG_BODY:
+          Serial.println(F(PMS_ERROR_MSG_BODY));
+          break;
+        case pms.ERROR_MSG_START:
+          Serial.println(F(PMS_ERROR_MSG_START));
+          break;
+        case pms.ERROR_MSG_LENGTH:
+          Serial.println(F(PMS_ERROR_MSG_LENGTH));
+          break;
+        case pms.ERROR_MSG_CKSUM:
+          Serial.println(F(PMS_ERROR_MSG_CKSUM));
+          break;
+        case pms.ERROR_PMS_TYPE:
+          Serial.println(F(PMS_ERROR_PMS_TYPE));
+          break;
+        }
+      }
+      NextPMSReadingTimeMS += PMSPeriod;
+      digitalWrite(PMS_SWITCH, LOW);
     }
   }
 
@@ -95,45 +155,7 @@ void loop()
   float pressure = bme.readPressure();
   Serial.printf("temp = %.2f, humid = %.2f, pressure = %.2f\n", temp, humid, pressure);
 
-  pms.read();
-  if (pms)
-  {
-    digitalWrite(2, HIGH);
-    Serial.printf("PM1.0 %hu, PM2.5 %hu, PM10 %hu [ug/m3]\n", pms.pm01, pms.pm25, pms.pm10);
-  }
-  else
-  {
-    digitalWrite(2, LOW);
-    Serial.println("Failed to read");
-    switch (pms.status)
-    {
-    case pms.OK: // should never come here
-      break;     // included to compile without warnings
-    case pms.ERROR_TIMEOUT:
-      Serial.println(F(PMS_ERROR_TIMEOUT));
-      break;
-    case pms.ERROR_MSG_UNKNOWN:
-      Serial.println(F(PMS_ERROR_MSG_UNKNOWN));
-      break;
-    case pms.ERROR_MSG_HEADER:
-      Serial.println(F(PMS_ERROR_MSG_HEADER));
-      break;
-    case pms.ERROR_MSG_BODY:
-      Serial.println(F(PMS_ERROR_MSG_BODY));
-      break;
-    case pms.ERROR_MSG_START:
-      Serial.println(F(PMS_ERROR_MSG_START));
-      break;
-    case pms.ERROR_MSG_LENGTH:
-      Serial.println(F(PMS_ERROR_MSG_LENGTH));
-      break;
-    case pms.ERROR_MSG_CKSUM:
-      Serial.println(F(PMS_ERROR_MSG_CKSUM));
-      break;
-    case pms.ERROR_PMS_TYPE:
-      Serial.println(F(PMS_ERROR_PMS_TYPE));
-      break;
-    }
-  }
-  delay(1000);
+  //TODO: communicate the current readings
+
+  delay(1000); //TODO: set this to something a little more reasonable, like 1 minute or more
 }
