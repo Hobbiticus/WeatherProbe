@@ -1,16 +1,28 @@
 #pragma once
-//#include <SoftwareSerial.h>
+
+//#define SOFTWARE_SERIAL_AVAILABLE
+
+#ifdef SOFTWARE_SERIAL_AVAILABLE
+#include <SoftwareSerial.h>
+#endif
 
 
 class MHZ19
 {
   public:
-    MHZ19(int rx, int tx, int pwm);
+#ifdef SOFTWARE_SERIAL_AVAILABLE
+    MHZ19(int rx, int tx);
+#endif
+    MHZ19(int pwm);
+
     int GetCO2();
     bool IsPreheated();
+    void ResetPreheatTime();
 
   private:
-    //SoftwareSerial m_Serial;
+#ifdef SOFTWARE_SERIAL_AVAILABLE
+    SoftwareSerial m_Serial;
+#endif
     bool m_IsHeated;
     unsigned long m_StartTime;
 
