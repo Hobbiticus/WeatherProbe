@@ -38,9 +38,11 @@ enum
 {
   TASK_TEMP = 0,
   TASK_PM,
-  TASK_CO2
+  TASK_CO2,
+  TASK_BATT_LEVEL,
+  TASK_COUNT
 };
-RTC_DATA_ATTR Task Tasks[3];
+RTC_DATA_ATTR Task Tasks[TASK_COUNT];
 
 #else
 
@@ -81,18 +83,19 @@ void TurnOnPMS()
 void ActualSetup()
 {
 #ifdef USE_TASKS
-  TaskInit(Tasks[TASK_TEMP], 5       * 1000, 0);
-  TaskInit(Tasks[TASK_PM],   10      * 1000, 5      * 1000);
+  TaskInit(Tasks[TASK_TEMP], 30      * 1000, 0);
+  TaskInit(Tasks[TASK_PM],   30 * 60 * 1000, 5      * 1000);
   //CO2 starts outputting at @20 seconds (after short off time)
   //maybe real data starts coming in after 1:20 (80s)
   //no change at 3:00
   //long cool down vs short cooldown seems to make no difference in behavior
   TaskInit(Tasks[TASK_CO2],  60 * 60 * 1000, 3 * 60 * 1000);
+  TaskInit(Tasks[TASK_BATT_LEVEL], 60 * 60 * 1000, 5 * 1000);
 
   {
     unsigned long earliestEvent = TaskGetNextEventTime(Tasks[0]);
     DebugPrintf("Task 0 next at %u\n", earliestEvent);
-    for (int i = 1; i < 3; i++)
+    for (int i = 1; i < TASK_COUNT; i++)
     {
       unsigned long nextEvent = TaskGetNextEventTime(Tasks[i]);
       DebugPrintf("Task %d next at %u, state = %d\n", i, nextEvent, Tasks[i].m_State);
@@ -103,14 +106,14 @@ void ActualSetup()
     DebugPrintf("Next event is at %u (in %u ms)\n", earliestEvent, sleepTimeMS);
   }
 
-  for (int i = 0; i < 3; i++)
+  for (int i = 0; i < TASK_COUNT; i++)
     TaskTick(Tasks[i]);
 
   DebugPrint("After initial tick....\n");
   {
     unsigned long earliestEvent = TaskGetNextEventTime(Tasks[0]);
     DebugPrintf("Task 0 next at %u\n", earliestEvent);
-    for (int i = 1; i < 3; i++)
+    for (int i = 1; i < TASK_COUNT; i++)
     {
       unsigned long nextEvent = TaskGetNextEventTime(Tasks[i]);
       DebugPrintf("Task %d next at %u, state = %d\n", i, nextEvent, Tasks[i].m_State);
@@ -182,11 +185,111 @@ void setup()
   DebugPrint("Sensors initialized!\n");
 }
 
+void DoTaskTemp(int state)
+{
+  if (state == 2)
+  {
+    float temp = bme.readTemperature();
+    float humid = bme.readHumidity();
+    float pressure = bme.readPressure();
+    DebugPrintf(" ========= temp = %.2f, humid = %.2f, pressure = %.2f\n", temp, humid, pressure);
+    //TODO: communicate this
+    return;
+  }
+}
+
+void DoTaskPM(int state)
+{
+  if (state == 1) //start warmup
+  {
+    TurnOnPMS();
+    pms.init();
+    return;
+  }
+
+  if (state == 2) //take reading
+  {
+    DebugPrintf(" ---- TAKING PM READING ----\n");
+    pms.read();
+    digitalWrite(PMS_SWITCH, LOW);
+    if (pms)
+    {
+      DebugPrintf(" ======= PM1.0 %hu, PM2.5 %hu, PM10 %hu [ug/m3]\n", pms.pm01, pms.pm25, pms.pm10);
+      //TODO: Communicate this
+    }
+    else
+    {
+      DebugPrintf("Failed to read PM\n");
+      switch (pms.status)
+      {
+      case pms.OK: // should never come here
+        break;     // included to compile without warnings
+      case pms.ERROR_TIMEOUT:
+        Serial.println(F(PMS_ERROR_TIMEOUT));
+        break;
+      case pms.ERROR_MSG_UNKNOWN:
+        Serial.println(F(PMS_ERROR_MSG_UNKNOWN));
+        break;
+      case pms.ERROR_MSG_HEADER:
+        Serial.println(F(PMS_ERROR_MSG_HEADER));
+        break;
+      case pms.ERROR_MSG_BODY:
+        Serial.println(F(PMS_ERROR_MSG_BODY));
+        break;
+      case pms.ERROR_MSG_START:
+        Serial.println(F(PMS_ERROR_MSG_START));
+        break;
+      case pms.ERROR_MSG_LENGTH:
+        Serial.println(F(PMS_ERROR_MSG_LENGTH));
+        break;
+      case pms.ERROR_MSG_CKSUM:
+        Serial.println(F(PMS_ERROR_MSG_CKSUM));
+        break;
+      case pms.ERROR_PMS_TYPE:
+        Serial.println(F(PMS_ERROR_PMS_TYPE));
+        break;
+      }
+    }
+    return;
+  }
+}
+
+void DoTaskCO2(int state)
+{
+  if (state == 1) //start warmup
+  {
+    TurnOnCO2();
+    return;
+  }
+  if (state == 2) //take reading
+  {
+    DebugPrintf(" ----- Taking CO2 Reading -----\n");
+    int co2Reading = co2.GetCO2();
+    digitalWrite(CO2_SWITCH, LOW);
+    DebugPrintf(" ========= CO2: %d\n", co2Reading);
+    //TODO: Communicate this
+    return;
+  }
+}
+
+void DoTaskBattLevel(int state)
+{
+  if (state == 2) //take reading
+  {
+    int reading = analogRead(BATT_LEVEL_PIN);
+    float voltage = reading;
+    voltage /= 4096.0;
+    voltage *= 2.5; // 5 / 2
+    DebugPrintf("BATTERY READING = %d -> %.1f Volts\n", reading, voltage);
+    //TODO: Communicate this
+    return;
+  }
+}
 
 void loop()
 {
 #ifdef USE_TASKS
-  for (int i = 0; i < 3; i++)
+  for (int i = 0; i < TASK_COUNT; i++)
   {
     Task& task = Tasks[i];
     int result = TaskTick(task);
@@ -195,86 +298,17 @@ void loop()
     switch (i)
     {
       case TASK_TEMP:
-      {
-        if (result == 2)
-        {
-          float temp = bme.readTemperature();
-          float humid = bme.readHumidity();
-          float pressure = bme.readPressure();
-          DebugPrintf(" ========= temp = %.2f, humid = %.2f, pressure = %.2f\n", temp, humid, pressure);
-          //TODO: communicate this
-        }
+        DoTaskTemp(result);
         break;
-      }
       case TASK_PM:
-      {
-        if (result == 1) //start warmup
-        {
-          TurnOnPMS();
-          pms.init();
-        }
-        else if (result == 2) //take reading
-        {
-          DebugPrintf(" ---- TAKING PM READING ----\n");
-          pms.read();
-          digitalWrite(PMS_SWITCH, LOW);
-          if (pms)
-          {
-            DebugPrintf(" ======= PM1.0 %hu, PM2.5 %hu, PM10 %hu [ug/m3]\n", pms.pm01, pms.pm25, pms.pm10);
-            //TODO: Communicate this
-          }
-          else
-          {
-            DebugPrintf("Failed to read PM\n");
-            switch (pms.status)
-            {
-            case pms.OK: // should never come here
-              break;     // included to compile without warnings
-            case pms.ERROR_TIMEOUT:
-              Serial.println(F(PMS_ERROR_TIMEOUT));
-              break;
-            case pms.ERROR_MSG_UNKNOWN:
-              Serial.println(F(PMS_ERROR_MSG_UNKNOWN));
-              break;
-            case pms.ERROR_MSG_HEADER:
-              Serial.println(F(PMS_ERROR_MSG_HEADER));
-              break;
-            case pms.ERROR_MSG_BODY:
-              Serial.println(F(PMS_ERROR_MSG_BODY));
-              break;
-            case pms.ERROR_MSG_START:
-              Serial.println(F(PMS_ERROR_MSG_START));
-              break;
-            case pms.ERROR_MSG_LENGTH:
-              Serial.println(F(PMS_ERROR_MSG_LENGTH));
-              break;
-            case pms.ERROR_MSG_CKSUM:
-              Serial.println(F(PMS_ERROR_MSG_CKSUM));
-              break;
-            case pms.ERROR_PMS_TYPE:
-              Serial.println(F(PMS_ERROR_PMS_TYPE));
-              break;
-            }
-          }
-        }
+        DoTaskPM(result);
         break;
-      }
       case TASK_CO2:
-      {
-        if (result == 1) //start warmup
-        {
-          TurnOnCO2();
-        }
-        else if (result == 2) //take reading
-        {
-          DebugPrintf(" ----- Taking CO2 Reading -----\n");
-          int co2Reading = co2.GetCO2();
-          digitalWrite(CO2_SWITCH, LOW);
-          DebugPrintf(" ========= CO2: %d\n", co2Reading);
-          //TODO: Communicate this
-        }
+        DoTaskCO2(result);
         break;
-      }
+      case TASK_BATT_LEVEL:
+        DoTaskBattLevel(result);
+        break;
     }
   }
 #else
