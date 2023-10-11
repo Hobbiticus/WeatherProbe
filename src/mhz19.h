@@ -6,6 +6,7 @@
 #include <SoftwareSerial.h>
 #endif
 
+typedef unsigned long (*GetTimeType)();
 
 class MHZ19
 {
@@ -13,11 +14,12 @@ class MHZ19
 #ifdef SOFTWARE_SERIAL_AVAILABLE
     MHZ19(int rx, int tx);
 #endif
-    MHZ19(int pwm);
+    MHZ19(int pwm, GetTimeType getTimeMS = millis);
 
     int GetCO2();
     bool IsPreheated();
     void ResetPreheatTime();
+    void SetPreheatStartTime(unsigned long whenMS);
 
   private:
 #ifdef SOFTWARE_SERIAL_AVAILABLE
@@ -40,5 +42,6 @@ class MHZ19
     static void InterruptLow(void* arg);
     int m_PWMPin;
     volatile int m_LastPWMReading;
+    GetTimeType m_GetTimeMS;
     volatile unsigned long m_LastHighTime;
 };
