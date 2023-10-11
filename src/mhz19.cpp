@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include "mhz19.h"
 
+#define PREHEAT_TIME_SECS 180
 
 #ifdef SOFTWARE_SERIAL_AVAILABLE
 MHZ19::MHZ19(int rx, int tx)
@@ -10,8 +11,8 @@ MHZ19::MHZ19(int rx, int tx)
 }
 #endif
 
-MHZ19::MHZ19(int pwm)
-: m_PWMPin(pwm), m_LastPWMReading(-1)
+MHZ19::MHZ19(int pwm, GetTimeType getTimeMS)
+: m_PWMPin(pwm), m_LastPWMReading(-1), m_GetTimeMS(getTimeMS)
 {
   attachInterruptArg(digitalPinToInterrupt(m_PWMPin), InterruptHigh, this, RISING);
 }
@@ -19,14 +20,21 @@ MHZ19::MHZ19(int pwm)
 void MHZ19::ResetPreheatTime()
 {
   m_IsHeated = false;
-  m_StartTime = millis();
+  m_StartTime = m_GetTimeMS();
+}
+
+void MHZ19::SetPreheatStartTime(unsigned long whenMS)
+{
+  m_StartTime = whenMS;
+  IsPreheated();
+  Serial.printf("%d ms until CO2 heated\n",(int)(1000 * PREHEAT_TIME_SECS - (m_GetTimeMS() - m_StartTime)));
 }
 
 bool MHZ19::IsPreheated()
 {
   if (m_IsHeated)
     return true;
-  m_IsHeated = millis() - m_StartTime > 1000 * 180;
+  m_IsHeated = m_GetTimeMS() - m_StartTime > 1000 * PREHEAT_TIME_SECS;
   return m_IsHeated;
 }
 
