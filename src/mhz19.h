@@ -19,7 +19,6 @@ class MHZ19
     int GetCO2();
     bool IsPreheated();
     void ResetPreheatTime();
-    void SetPreheatStartTime(unsigned long whenMS);
 
   private:
 #ifdef SOFTWARE_SERIAL_AVAILABLE

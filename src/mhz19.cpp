@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include "mhz19.h"
+#include "debug.h"
 
 #define PREHEAT_TIME_SECS 180
 
@@ -12,7 +13,7 @@ MHZ19::MHZ19(int rx, int tx)
 #endif
 
 MHZ19::MHZ19(int pwm, GetTimeType getTimeMS)
-: m_PWMPin(pwm), m_LastPWMReading(-1), m_GetTimeMS(getTimeMS)
+: m_PWMPin(pwm), m_LastPWMReading(-2), m_GetTimeMS(getTimeMS)
 {
   attachInterruptArg(digitalPinToInterrupt(m_PWMPin), InterruptHigh, this, RISING);
 }
@@ -21,13 +22,6 @@ void MHZ19::ResetPreheatTime()
 {
   m_IsHeated = false;
   m_StartTime = m_GetTimeMS();
-}
-
-void MHZ19::SetPreheatStartTime(unsigned long whenMS)
-{
-  m_StartTime = whenMS;
-  IsPreheated();
-  Serial.printf("%d ms until CO2 heated\n",(int)(1000 * PREHEAT_TIME_SECS - (m_GetTimeMS() - m_StartTime)));
 }
 
 bool MHZ19::IsPreheated()
@@ -44,6 +38,7 @@ void MHZ19::InterruptHigh(void* arg)
   mhz->m_LastHighTime = micros();
   detachInterrupt(digitalPinToInterrupt(mhz->m_PWMPin));
   attachInterruptArg(digitalPinToInterrupt(mhz->m_PWMPin), MHZ19::InterruptLow, arg, FALLING);
+  //DebugPrintf("beep! ^\n");
 }
 
 void MHZ19::InterruptLow(void* arg)
@@ -54,12 +49,16 @@ void MHZ19::InterruptLow(void* arg)
   attachInterruptArg(digitalPinToInterrupt(mhz->m_PWMPin), InterruptHigh, arg, RISING);
   unsigned long highTimeMS = (now - mhz->m_LastHighTime) / 1000;
   mhz->m_LastPWMReading = (highTimeMS - 2) * 5;
+  //DebugPrintf("boop! v %d\n", mhz->m_LastPWMReading);
 }
 
 int MHZ19::GetCO2()
 {
   if (!IsPreheated())
+  {
+    DebugPrintf("Not heated yet, but got %d\n", m_LastPWMReading);
     return -1;
+  }
 
   if (m_PWMPin >= 0)
     return m_LastPWMReading;
