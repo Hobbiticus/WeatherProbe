@@ -1,4 +1,4 @@
 #pragma once
 
 unsigned long GetTimeMS();
-void TimeGoToSleep();
+void TimeGoToSleep(int howLongMS);

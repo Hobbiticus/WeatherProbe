@@ -83,7 +83,7 @@ void TurnOnPMS()
 void ActualSetup()
 {
 #ifdef USE_TASKS
-  TaskInit(Tasks[TASK_TEMP], 30      * 1000, 0);
+  TaskInit(Tasks[TASK_TEMP], 30 * 60 * 1000, 0);
   TaskInit(Tasks[TASK_PM],   30 * 60 * 1000, 5      * 1000);
   //CO2 starts outputting at @20 seconds (after short off time)
   //maybe real data starts coming in after 1:20 (80s)
@@ -279,8 +279,8 @@ void DoTaskBattLevel(int state)
     int reading = analogRead(BATT_LEVEL_PIN);
     float voltage = reading;
     voltage /= 4096.0;
-    voltage *= 2.5; // 5 / 2
-    DebugPrintf("BATTERY READING = %d -> %.1f Volts\n", reading, voltage);
+    voltage *= 8.48;
+    DebugPrintf("BATTERY READING = %d -> %.2f Volts\n", reading, voltage);
     //TODO: Communicate this
     return;
   }
@@ -429,6 +429,6 @@ void loop()
 #endif
 
   DebugSleep();
-  TimeGoToSleep();
+  TimeGoToSleep(sleepTimeMS);
   esp_deep_sleep_start();
 }

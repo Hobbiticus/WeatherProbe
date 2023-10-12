@@ -7,7 +7,7 @@ unsigned long GetTimeMS()
   return CurrentTimeMS + (millis() - bootTime);
 }
 
-void TimeGoToSleep()
+void TimeGoToSleep(int howLongMS)
 {
-    CurrentTimeMS += millis() - bootTime + 1000; //in milliseconds
+    CurrentTimeMS += millis() - bootTime + howLongMS; //in milliseconds
 }
