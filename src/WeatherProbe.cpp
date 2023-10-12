@@ -29,10 +29,6 @@ Adafruit_BME280 bme; // I2C, 22 = SCL, 21 = SDA
 
 #define BATT_LEVEL_PIN 36
 
-#define USE_TASKS
-
-
-#ifdef USE_TASKS
 
 enum
 {
@@ -44,45 +40,24 @@ enum
 };
 RTC_DATA_ATTR Task Tasks[TASK_COUNT];
 
-#else
-
-const unsigned int CO2Period = 1000 * 60 * 15;   //this is unlikely to change very frequently and takes a lot of energy to do
-const unsigned int PMSPeriod = 1000 * 60;
-const unsigned int TempPeriod = 1000 * 60;
-const unsigned int PMSStabalizeTimeOffsetMS = 5000; //this seems about right in testing
-
-RTC_DATA_ATTR unsigned long NextCO2ReadingTimeMS;
-int LastCO2Reading = -1;
-RTC_DATA_ATTR unsigned long NextPMSReadingTimeMS;
-RTC_DATA_ATTR unsigned int PMSStabalizeTimeMS;
-
-#endif
-
 void TurnOnCO2()
 {
   DebugPrintf("+++++++ Starting to heat CO2 +++++++\n");
   co2.ResetPreheatTime();
   digitalWrite(CO2_SWITCH, HIGH);
-#ifdef USE_TASKS
   CO2Heating = true;
   CO2PreheatStartTime = GetTimeMS();  
-#endif
 }
 
 void TurnOnPMS()
 {
   DebugPrintf("+++++++ Turning on PM sensor +++++++\n");
-#ifndef USE_TASKS
-  PMSStabalizeTimeMS = GetTimeMS() + PMSStabalizeTimeOffsetMS;
-  PMSStabalizing = true;
-#endif
   digitalWrite(PMS_SWITCH, HIGH);
 }
 
 //runs ONLY ONCE
 void ActualSetup()
 {
-#ifdef USE_TASKS
   TaskInit(Tasks[TASK_TEMP], 30 * 60 * 1000, 0);
   TaskInit(Tasks[TASK_PM],   30 * 60 * 1000, 5      * 1000);
   //CO2 starts outputting at @20 seconds (after short off time)
@@ -124,11 +99,6 @@ void ActualSetup()
     DebugPrintf("Next event is at %u (in %u ms)\n", earliestEvent, sleepTimeMS);
   }
 
-#else
-  NextCO2ReadingTimeMS = GetTimeMS();
-  NextPMSReadingTimeMS = GetTimeMS();
-#endif
-
   //turn on sensors to start
   TurnOnCO2();
   TurnOnPMS();
@@ -154,11 +124,7 @@ void setup()
   {
     ActualSetup();
   }
-#ifdef USE_TASKS
   DebugPrintf("Next CO2 time = %u, next PM time = %u\n", TaskGetNextEventTime(Tasks[TASK_CO2]), TaskGetNextEventTime(Tasks[TASK_PM]));
-#else
-  DebugPrintf("Next CO2 time = %u, next PM time = %u\n", NextCO2ReadingTimeMS, NextPMSReadingTimeMS);
-#endif
 
   DebugPrint("Starting BME280 temperature/humidity/pressure sensor...\n");
   int status = bme.begin(BME280_ADDRESS_ALTERNATE);  
@@ -177,11 +143,6 @@ void setup()
   }
 
   DebugPrint("Nothing to do for MHZ-19 CO2 sensor!\n");
-#ifdef USE_TASKS
-#else
-  if (CO2Heating)
-    co2.SetPreheatStartTime(CO2PreheatStartTime);
-#endif
   DebugPrint("Sensors initialized!\n");
 }
 
@@ -288,7 +249,6 @@ void DoTaskBattLevel(int state)
 
 void loop()
 {
-#ifdef USE_TASKS
   for (int i = 0; i < TASK_COUNT; i++)
   {
     Task& task = Tasks[i];
@@ -311,99 +271,11 @@ void loop()
         break;
     }
   }
-#else
-  //do CO2 things...
-  if (GetTimeMS() - NextCO2ReadingTimeMS < 0x7FFFFFFF)
-  {
-    DebugPrintf("Time to take a CO2 reading: %u > %u\n", GetTimeMS(), NextCO2ReadingTimeMS);
-    if (!CO2Heating)
-    {
-      TurnOnCO2();
-    }
-    if (co2.IsPreheated())
-    {
-      LastCO2Reading = co2.GetCO2();
-      DebugPrintf(" ======= co2 = %d\n", LastCO2Reading);
-      NextCO2ReadingTimeMS += CO2Period;
-      digitalWrite(CO2_SWITCH, LOW);
-      CO2Heating = false;
-    }
-    else
-    {
-      DebugPrintf("CO2 is still heating...\n");
-    }
-  }
 
-  //do PMS things...
-  if (GetTimeMS() - NextPMSReadingTimeMS < 0x7FFFFFFF)
-  {
-    DebugPrintf("Time to take a PM reading: %u > %u\n", GetTimeMS(), NextPMSReadingTimeMS);
-    if (!PMSStabalizing)
-    {
-      TurnOnPMS();
-    }
-    if (GetTimeMS() - PMSStabalizeTimeMS < 0x7FFFFFFF)
-    {
-      pms.init();
-      pms.read();
-      if (pms)
-      {
-        DebugPrintf(" ======= PM1.0 %hu, PM2.5 %hu, PM10 %hu [ug/m3]\n", pms.pm01, pms.pm25, pms.pm10);
-      }
-      else
-      {
-        DebugPrint("Failed to read\n");
-        switch (pms.status)
-        {
-        case pms.OK: // should never come here
-          break;     // included to compile without warnings
-        case pms.ERROR_TIMEOUT:
-          Serial.println(F(PMS_ERROR_TIMEOUT));
-          break;
-        case pms.ERROR_MSG_UNKNOWN:
-          Serial.println(F(PMS_ERROR_MSG_UNKNOWN));
-          break;
-        case pms.ERROR_MSG_HEADER:
-          Serial.println(F(PMS_ERROR_MSG_HEADER));
-          break;
-        case pms.ERROR_MSG_BODY:
-          Serial.println(F(PMS_ERROR_MSG_BODY));
-          break;
-        case pms.ERROR_MSG_START:
-          Serial.println(F(PMS_ERROR_MSG_START));
-          break;
-        case pms.ERROR_MSG_LENGTH:
-          Serial.println(F(PMS_ERROR_MSG_LENGTH));
-          break;
-        case pms.ERROR_MSG_CKSUM:
-          Serial.println(F(PMS_ERROR_MSG_CKSUM));
-          break;
-        case pms.ERROR_PMS_TYPE:
-          Serial.println(F(PMS_ERROR_PMS_TYPE));
-          break;
-        }
-      }
-      NextPMSReadingTimeMS += PMSPeriod;
-      digitalWrite(PMS_SWITCH, LOW);
-      PMSStabalizing = false;
-    }
-  }
-
-  float temp = bme.readTemperature();
-  float humid = bme.readHumidity();
-  float pressure = bme.readPressure();
-  DebugPrintf("temp = %.2f, humid = %.2f, pressure = %.2f\n", temp, humid, pressure);
-
-  //TODO: communicate the current readings
-
-  esp_sleep_enable_timer_wakeup(1000 * 1000); //in microseconds
-#endif
-
-#ifdef USE_TASKS
   unsigned long earliestEvent = TaskGetNextEventTime(Tasks[0]);
   DebugPrintf("Task 0 next at %u\n", earliestEvent);
   bool goToSleep = true;
-  for (int i = 1; i < 3; i++)
+  for (int i = 1; i < TASK_COUNT; i++)
   {
     unsigned long nextEvent = TaskGetNextEventTime(Tasks[i]);
     DebugPrintf("Task %d next at %u, state = %d\n", i, nextEvent, Tasks[i].m_State);
@@ -425,8 +297,6 @@ void loop()
   //time to go to sleep!
   DebugPrint("DEEP SLEEPING!\n");
   esp_sleep_enable_timer_wakeup(sleepTimeMS * 1000); //in microseconds
-
-#endif
 
   DebugSleep();
   TimeGoToSleep(sleepTimeMS);
