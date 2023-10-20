@@ -13,9 +13,10 @@
 //MHZ-19 CO2 sensor
 #define CO2_PWM 33
 #define CO2_SWITCH 26
-MHZ19 co2(CO2_PWM, GetTimeMS);
-RTC_DATA_ATTR unsigned long CO2PreheatStartTime;
-RTC_DATA_ATTR bool CO2Heating;
+#define CO2_RX 35
+#define CO2_TX 25
+//MHZ19 co2(CO2_PWM, GetTimeMS);
+MHZ19 co2(CO2_RX, CO2_TX, GetTimeMS);
 
 //PMS7003 PMS sensor
 constexpr auto PMS_RX = 16;
@@ -43,29 +44,99 @@ RTC_DATA_ATTR Task Tasks[TASK_COUNT];
 void TurnOnCO2()
 {
   DebugPrintf("+++++++ Starting to heat CO2 +++++++\n");
-  co2.ResetPreheatTime();
   digitalWrite(CO2_SWITCH, HIGH);
-  CO2Heating = true;
-  CO2PreheatStartTime = GetTimeMS();  
+  co2.ResetPreheatTime();
 }
 
 void TurnOnPMS()
 {
   DebugPrintf("+++++++ Turning on PM sensor +++++++\n");
   digitalWrite(PMS_SWITCH, HIGH);
+  pms.init();
+}
+
+void DoTaskTemp(int state)
+{
+  if (state == 2)
+  {
+    float temp = bme.readTemperature();
+    float humid = bme.readHumidity();
+    float pressure = bme.readPressure();
+    DebugPrintf(" ========= temp = %.2f, humid = %.2f, pressure = %.2f\n", temp, humid, pressure);
+    //TODO: communicate this
+    return;
+  }
+}
+
+void DoTaskPM(int state)
+{
+  if (state == 1) //start warmup
+  {
+    TurnOnPMS();
+    return;
+  }
+
+  if (state == 2) //take reading
+  {
+    DebugPrintf(" ---- TAKING PM READING ----\n");
+    pms.read();
+    digitalWrite(PMS_SWITCH, LOW);
+    if (pms)
+    {
+      DebugPrintf(" ======= PM1.0 %hu, PM2.5 %hu, PM10 %hu [ug/m3]\n", pms.pm01, pms.pm25, pms.pm10);
+      //TODO: Communicate this
+    }
+    else
+    {
+      DebugPrintf("Failed to read PM\n");
+    }
+    return;
+  }
+}
+
+void DoTaskCO2(int state)
+{
+  if (state == 1) //start warmup
+  {
+    TurnOnCO2();
+    return;
+  }
+  if (state == 2) //take reading
+  {
+    DebugPrintf(" ----- Taking CO2 Reading -----\n");
+    int co2Reading = co2.GetCO2();
+    digitalWrite(CO2_SWITCH, LOW);
+    DebugPrintf(" ========= CO2: %d\n", co2Reading);
+    //TODO: Communicate this
+    return;
+  }
+}
+
+void DoTaskBattLevel(int state)
+{
+  if (state == 2) //take reading
+  {
+    int reading = analogRead(BATT_LEVEL_PIN);
+    float voltage = reading;
+    voltage /= 4096.0;
+    voltage *= 8.48;
+    DebugPrintf("BATTERY READING = %d -> %.2f Volts\n", reading, voltage);
+    //TODO: Communicate this
+    return;
+  }
 }
 
 //runs ONLY ONCE
 void ActualSetup()
 {
-  TaskInit(Tasks[TASK_TEMP], 30 * 60 * 1000, 0);
-  TaskInit(Tasks[TASK_PM],   30 * 60 * 1000, 5      * 1000);
+  TaskInit(Tasks[TASK_TEMP], 30 * 1000,      0);
+  TaskInit(Tasks[TASK_PM],   10 * 60 * 1000, 5      * 1000);
   //CO2 starts outputting at @20 seconds (after short off time)
   //maybe real data starts coming in after 1:20 (80s)
   //no change at 3:00
   //long cool down vs short cooldown seems to make no difference in behavior
-  TaskInit(Tasks[TASK_CO2],  60 * 60 * 1000, 3 * 60 * 1000);
-  TaskInit(Tasks[TASK_BATT_LEVEL], 60 * 60 * 1000, 5 * 1000);
+  TaskInit(Tasks[TASK_CO2],  30 * 60 * 1000, 182 * 1000);
+  TaskInit(Tasks[TASK_BATT_LEVEL], 60 * 60 * 1000, 0);
 
   {
     unsigned long earliestEvent = TaskGetNextEventTime(Tasks[0]);
@@ -82,7 +153,27 @@ void ActualSetup()
   }
 
   for (int i = 0; i < TASK_COUNT; i++)
-    TaskTick(Tasks[i]);
+  {
+    Task& task = Tasks[i];
+    int result = TaskTick(task);
+    if (result == 0)
+      continue;
+    switch (i)
+    {
+      case TASK_TEMP:
+        DoTaskTemp(result);
+        break;
+      // case TASK_PM:
+      //   DoTaskPM(result);
+      //   break;
+      // case TASK_CO2:
+      //   DoTaskCO2(result);
+      //   break;
+      case TASK_BATT_LEVEL:
+        DoTaskBattLevel(result);
+        break;
+    }
+  }
 
   DebugPrint("After initial tick....\n");
   {
@@ -120,12 +211,6 @@ void setup()
   DebugPrint("Wakeup cause = " + String(wakeup_reason) + "\n");
   DebugPrint("Boot time = " + String(millis()) + "; now = " + String(GetTimeMS()) + "\n");
 
-  if (wakeup_reason < 1 || wakeup_reason > 5)
-  {
-    ActualSetup();
-  }
-  DebugPrintf("Next CO2 time = %u, next PM time = %u\n", TaskGetNextEventTime(Tasks[TASK_CO2]), TaskGetNextEventTime(Tasks[TASK_PM]));
-
   DebugPrint("Starting BME280 temperature/humidity/pressure sensor...\n");
   int status = bme.begin(BME280_ADDRESS_ALTERNATE);  
   // You can also pass in a Wire library object like &Wire2
@@ -142,109 +227,14 @@ void setup()
     DebugPrint("yay!\n");
   }
 
+  if (wakeup_reason < 1 || wakeup_reason > 5)
+  {
+    ActualSetup();
+  }
+  DebugPrintf("Next CO2 time = %u, next PM time = %u\n", TaskGetNextEventTime(Tasks[TASK_CO2]), TaskGetNextEventTime(Tasks[TASK_PM]));
+
   DebugPrint("Nothing to do for MHZ-19 CO2 sensor!\n");
   DebugPrint("Sensors initialized!\n");
-}
-
-void DoTaskTemp(int state)
-{
-  if (state == 2)
-  {
-    float temp = bme.readTemperature();
-    float humid = bme.readHumidity();
-    float pressure = bme.readPressure();
-    DebugPrintf(" ========= temp = %.2f, humid = %.2f, pressure = %.2f\n", temp, humid, pressure);
-    //TODO: communicate this
-    return;
-  }
-}
-
-void DoTaskPM(int state)
-{
-  if (state == 1) //start warmup
-  {
-    TurnOnPMS();
-    pms.init();
-    return;
-  }
-
-  if (state == 2) //take reading
-  {
-    DebugPrintf(" ---- TAKING PM READING ----\n");
-    pms.read();
-    digitalWrite(PMS_SWITCH, LOW);
-    if (pms)
-    {
-      DebugPrintf(" ======= PM1.0 %hu, PM2.5 %hu, PM10 %hu [ug/m3]\n", pms.pm01, pms.pm25, pms.pm10);
-      //TODO: Communicate this
-    }
-    else
-    {
-      DebugPrintf("Failed to read PM\n");
-      switch (pms.status)
-      {
-      case pms.OK: // should never come here
-        break;     // included to compile without warnings
-      case pms.ERROR_TIMEOUT:
-        Serial.println(F(PMS_ERROR_TIMEOUT));
-        break;
-      case pms.ERROR_MSG_UNKNOWN:
-        Serial.println(F(PMS_ERROR_MSG_UNKNOWN));
-        break;
-      case pms.ERROR_MSG_HEADER:
-        Serial.println(F(PMS_ERROR_MSG_HEADER));
-        break;
-      case pms.ERROR_MSG_BODY:
-        Serial.println(F(PMS_ERROR_MSG_BODY));
-        break;
-      case pms.ERROR_MSG_START:
-        Serial.println(F(PMS_ERROR_MSG_START));
-        break;
-      case pms.ERROR_MSG_LENGTH:
-        Serial.println(F(PMS_ERROR_MSG_LENGTH));
-        break;
-      case pms.ERROR_MSG_CKSUM:
-        Serial.println(F(PMS_ERROR_MSG_CKSUM));
-        break;
-      case pms.ERROR_PMS_TYPE:
-        Serial.println(F(PMS_ERROR_PMS_TYPE));
-        break;
-      }
-    }
-    return;
-  }
-}
-
-void DoTaskCO2(int state)
-{
-  if (state == 1) //start warmup
-  {
-    TurnOnCO2();
-    return;
-  }
-  if (state == 2) //take reading
-  {
-    DebugPrintf(" ----- Taking CO2 Reading -----\n");
-    int co2Reading = co2.GetCO2();
-    digitalWrite(CO2_SWITCH, LOW);
-    DebugPrintf(" ========= CO2: %d\n", co2Reading);
-    //TODO: Communicate this
-    return;
-  }
-}
-
-void DoTaskBattLevel(int state)
-{
-  if (state == 2) //take reading
-  {
-    int reading = analogRead(BATT_LEVEL_PIN);
-    float voltage = reading;
-    voltage /= 4096.0;
-    voltage *= 8.48;
-    DebugPrintf("BATTERY READING = %d -> %.2f Volts\n", reading, voltage);
-    //TODO: Communicate this
-    return;
-  }
 }
 
 void loop()
@@ -283,19 +273,22 @@ void loop()
       earliestEvent = nextEvent;
     goToSleep &= Tasks[i].m_State != Task::WARMING; //any warming will prevent sleeping
   }
-  unsigned int sleepTimeMS = earliestEvent - GetTimeMS();
+  unsigned long now = GetTimeMS();
+  unsigned int sleepTimeMS = earliestEvent - now;
+  if (earliestEvent < now)
+    sleepTimeMS = 0;
   DebugPrintf("Next event is at %u (in %u ms)\n", earliestEvent, sleepTimeMS);
   if (sleepTimeMS > 0x7FFFFFFF)
     return; //we are passed due somehow!
 
   if (!goToSleep)
   {
-    DebugPrint("Delaying\n");
+    DebugPrintf("Delaying for %u ms\n", sleepTimeMS);
     delay(sleepTimeMS);
     return;
   }
   //time to go to sleep!
-  DebugPrint("DEEP SLEEPING!\n");
+  DebugPrintf("DEEP SLEEPING! for %u ms\n", sleepTimeMS);
   esp_sleep_enable_timer_wakeup(sleepTimeMS * 1000); //in microseconds
 
   DebugSleep();
