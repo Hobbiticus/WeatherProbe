@@ -77,7 +77,7 @@ int MHZ19::GetCO2()
   if (wrote != sizeof(request))
   {
     DebugPrintf("Wrote %d to serial\n", wrote);
-    return;
+    return -4;
   }
 
   unsigned char response[9];
