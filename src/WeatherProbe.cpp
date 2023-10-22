@@ -8,6 +8,12 @@
 #include "debug.h"
 #include "MyTime.h"
 #include "Tasker.h"
+#include "EspNowRelay.h"
+#include "../../CentralBrain/include/IngestProtocol.h"
+#include "../../CentralBrain/include/WeatherProtocol.h"
+
+unsigned char RelayMAC[6] = {0xC8, 0xC9, 0xA3, 0xD2, 0x9D, 0xC8};
+const unsigned short IngestPort = 7777;
 
 
 //MHZ-19 CO2 sensor
@@ -30,12 +36,13 @@ Adafruit_BME280 bme; // I2C, 22 = SCL, 21 = SDA
 
 #define BATT_LEVEL_PIN 36
 
+EspNowRelay NowRelay;
 
 enum
 {
   TASK_TEMP = 0,
-  TASK_PM,
   TASK_CO2,
+  TASK_PM,
   TASK_BATT_LEVEL,
   TASK_COUNT
 };
@@ -55,7 +62,7 @@ void TurnOnPMS()
   pms.init();
 }
 
-void DoTaskTemp(int state)
+bool DoTaskTemp(int state, TemperatureData& data)
 {
   if (state == 2)
   {
@@ -63,17 +70,20 @@ void DoTaskTemp(int state)
     float humid = bme.readHumidity();
     float pressure = bme.readPressure();
     DebugPrintf(" ========= temp = %.2f, humid = %.2f, pressure = %.2f\n", temp, humid, pressure);
-    //TODO: communicate this
-    return;
+    data.m_Temperature = (short)(temp * 100);
+    data.m_Humidity = (unsigned char)(humid * 10);
+    data.m_Pressure = (unsigned int)(pressure * 100);
+    return true;
   }
+  return false;
 }
 
-void DoTaskPM(int state)
+bool DoTaskPM(int state, PMData& data)
 {
   if (state == 1) //start warmup
   {
     TurnOnPMS();
-    return;
+    return false;
   }
 
   if (state == 2) //take reading
@@ -84,22 +94,25 @@ void DoTaskPM(int state)
     if (pms)
     {
       DebugPrintf(" ======= PM1.0 %hu, PM2.5 %hu, PM10 %hu [ug/m3]\n", pms.pm01, pms.pm25, pms.pm10);
-      //TODO: Communicate this
+      data.m_10 = pms.pm10;
+      data.m_2_5 = pms.pm25;
+      data.m_0_1 = pms.pm01;
+      return true;
     }
     else
     {
       DebugPrintf("Failed to read PM\n");
     }
-    return;
   }
+  return false;
 }
 
-void DoTaskCO2(int state)
+bool DoTaskCO2(int state, CO2Data& data)
 {
   if (state == 1) //start warmup
   {
     TurnOnCO2();
-    return;
+    return false;
   }
   if (state == 2) //take reading
   {
@@ -107,12 +120,14 @@ void DoTaskCO2(int state)
     int co2Reading = co2.GetCO2();
     digitalWrite(CO2_SWITCH, LOW);
     DebugPrintf(" ========= CO2: %d\n", co2Reading);
-    //TODO: Communicate this
-    return;
+    data.m_PPM = co2Reading;
+    return true;
   }
+
+  return false;
 }
 
-void DoTaskBattLevel(int state)
+bool DoTaskBattLevel(int state, BatteryData& data)
 {
   if (state == 2) //take reading
   {
@@ -121,8 +136,88 @@ void DoTaskBattLevel(int state)
     voltage /= 4096.0;
     voltage *= 8.48;
     DebugPrintf("BATTERY READING = %d -> %.2f Volts\n", reading, voltage);
-    //TODO: Communicate this
-    return;
+    data.m_Voltage = (unsigned int)(voltage * 100);
+    return true;
+  }
+  return false;
+}
+
+void ExecuteTasks()
+{
+  unsigned char out[256] = {0};
+  IngestHeader* ih = (IngestHeader*)out;
+  ih->m_Type = DATA_TYPE_WEATHER;
+  WeatherHeader* wh = (WeatherHeader*)(ih + 1);
+  wh->m_DataIncluded = 0;
+  unsigned char* ptr = (unsigned char*)(wh + 1);
+
+  for (int i = 0; i < TASK_COUNT; i++)
+  {
+    Task& task = Tasks[i];
+    int result = TaskTick(task);
+    if (result == 0)
+      continue;
+    switch (i)
+    {
+      case TASK_TEMP:
+      {
+        TemperatureData* data = (TemperatureData*)ptr;
+        if (DoTaskTemp(result, *data))
+        {
+          ptr += sizeof(TemperatureData);
+          wh->m_DataIncluded |= WEATHER_TEMP_BIT;
+        }
+        break;
+      }
+      case TASK_CO2:
+      {
+        CO2Data* data = (CO2Data*)ptr;
+        if (DoTaskCO2(result, *data))
+        {
+          ptr += sizeof(CO2Data);
+          wh->m_DataIncluded |= WEATHER_CO2_BIT;
+        }
+        break;
+      }
+      case TASK_PM:
+      {
+        PMData* data = (PMData*)ptr;
+        if (DoTaskPM(result, *data))
+        {
+          ptr += sizeof(PMData);
+          wh->m_DataIncluded |= WEATHER_PM_BIT;
+        }
+        break;
+      }
+      case TASK_BATT_LEVEL:
+      {
+        BatteryData* data = (BatteryData*)ptr;
+        if (DoTaskBattLevel(result, *data))
+        {
+          ptr += sizeof(BatteryData);
+          wh->m_DataIncluded |= WEATHER_BATT_BIT;
+        }
+        break;
+      }
+    }
+  }
+
+  if (wh->m_DataIncluded != 0)
+  {
+    //send the data to the central brain
+    unsigned int packetLen = (unsigned int)(ptr - out);
+
+    unsigned int addr;
+    unsigned char* pAddr = (unsigned char*)&addr;
+    pAddr[0] = 192; pAddr[1] = 168; pAddr[2] = 1; pAddr[3] = 222;
+    Serial.println("Connecting...");
+    int sock = NowRelay.Connect(addr, IngestPort);
+    Serial.printf("Connect returned %d\n", sock);
+    if (sock >= 0)
+    {
+      NowRelay.Send(sock, out, packetLen);
+      NowRelay.Close(sock);
+    }
   }
 }
 
@@ -130,13 +225,13 @@ void DoTaskBattLevel(int state)
 void ActualSetup()
 {
   TaskInit(Tasks[TASK_TEMP], 30 * 1000,      0);
-  TaskInit(Tasks[TASK_PM],   10 * 60 * 1000, 5      * 1000);
   //CO2 starts outputting at @20 seconds (after short off time)
   //maybe real data starts coming in after 1:20 (80s)
   //no change at 3:00
   //long cool down vs short cooldown seems to make no difference in behavior
   TaskInit(Tasks[TASK_CO2],  30 * 60 * 1000, 182 * 1000);
-  TaskInit(Tasks[TASK_BATT_LEVEL], 60 * 60 * 1000, 0);
+  TaskInit(Tasks[TASK_PM],   10 * 60 * 1000, 5      * 1000);
+  TaskInit(Tasks[TASK_BATT_LEVEL], 10 * 60 * 1000, 0);
 
   {
     unsigned long earliestEvent = TaskGetNextEventTime(Tasks[0]);
@@ -152,28 +247,7 @@ void ActualSetup()
     DebugPrintf("Next event is at %u (in %u ms)\n", earliestEvent, sleepTimeMS);
   }
 
-  for (int i = 0; i < TASK_COUNT; i++)
-  {
-    Task& task = Tasks[i];
-    int result = TaskTick(task);
-    if (result == 0)
-      continue;
-    switch (i)
-    {
-      case TASK_TEMP:
-        DoTaskTemp(result);
-        break;
-      // case TASK_PM:
-      //   DoTaskPM(result);
-      //   break;
-      // case TASK_CO2:
-      //   DoTaskCO2(result);
-      //   break;
-      case TASK_BATT_LEVEL:
-        DoTaskBattLevel(result);
-        break;
-    }
-  }
+  ExecuteTasks();
 
   DebugPrint("After initial tick....\n");
   {
@@ -207,6 +281,8 @@ void setup()
 
   DebugInit();
 
+  NowRelay.Init(RelayMAC);
+
   esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
   DebugPrint("Wakeup cause = " + String(wakeup_reason) + "\n");
   DebugPrint("Boot time = " + String(millis()) + "; now = " + String(GetTimeMS()) + "\n");
@@ -239,28 +315,7 @@ void setup()
 
 void loop()
 {
-  for (int i = 0; i < TASK_COUNT; i++)
-  {
-    Task& task = Tasks[i];
-    int result = TaskTick(task);
-    if (result == 0)
-      continue;
-    switch (i)
-    {
-      case TASK_TEMP:
-        DoTaskTemp(result);
-        break;
-      case TASK_PM:
-        DoTaskPM(result);
-        break;
-      case TASK_CO2:
-        DoTaskCO2(result);
-        break;
-      case TASK_BATT_LEVEL:
-        DoTaskBattLevel(result);
-        break;
-    }
-  }
+  ExecuteTasks();
 
   unsigned long earliestEvent = TaskGetNextEventTime(Tasks[0]);
   DebugPrintf("Task 0 next at %u\n", earliestEvent);
