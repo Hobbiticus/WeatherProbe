@@ -71,7 +71,7 @@ bool DoTaskTemp(int state, TemperatureData& data)
     float pressure = bme.readPressure();
     DebugPrintf(" ========= temp = %.2f, humid = %.2f, pressure = %.2f\n", temp, humid, pressure);
     data.m_Temperature = (short)(temp * 100);
-    data.m_Humidity = (unsigned char)(humid * 10);
+    data.m_Humidity = (unsigned short)(humid * 10);
     data.m_Pressure = (unsigned int)(pressure * 100);
     return true;
   }
@@ -231,7 +231,7 @@ void ActualSetup()
   //long cool down vs short cooldown seems to make no difference in behavior
   TaskInit(Tasks[TASK_CO2],  30 * 60 * 1000, 182 * 1000);
   TaskInit(Tasks[TASK_PM],   10 * 60 * 1000, 5      * 1000);
-  TaskInit(Tasks[TASK_BATT_LEVEL], 10 * 60 * 1000, 0);
+  TaskInit(Tasks[TASK_BATT_LEVEL], 1 * 60 * 1000, 0);
 
   {
     unsigned long earliestEvent = TaskGetNextEventTime(Tasks[0]);
