@@ -13,6 +13,9 @@
 #include "../../CentralBrain/include/WeatherProtocol.h"
 
 unsigned char RelayMAC[6] = {0xC8, 0xC9, 0xA3, 0xD2, 0x9D, 0xC8};
+unsigned char BrainAddr[4] = {192, 168, 1, 222};
+unsigned char PiAddr[4] = {192, 168, 1, 135}; //maybe? might be wrong
+
 const unsigned short IngestPort = 7777;
 
 
@@ -207,12 +210,16 @@ void ExecuteTasks()
     //send the data to the central brain
     unsigned int packetLen = (unsigned int)(ptr - out);
 
-    unsigned int addr;
-    unsigned char* pAddr = (unsigned char*)&addr;
-    pAddr[0] = 192; pAddr[1] = 168; pAddr[2] = 1; pAddr[3] = 222;
     Serial.println("Connecting...");
-    int sock = NowRelay.Connect(addr, IngestPort);
-    Serial.printf("Connect returned %d\n", sock);
+    int sock = NowRelay.Connect(*((unsigned int*)BrainAddr), IngestPort);
+    Serial.printf("Connect to brain returned %d\n", sock);
+    if (sock >= 0)
+    {
+      NowRelay.Send(sock, out, packetLen);
+      NowRelay.Close(sock);
+    }
+    sock = NowRelay.Connect(*((unsigned int*)PiAddr), IngestPort);
+    Serial.printf("Connect to pi returned %d\n", sock);
     if (sock >= 0)
     {
       NowRelay.Send(sock, out, packetLen);
