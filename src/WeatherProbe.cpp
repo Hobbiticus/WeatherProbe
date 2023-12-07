@@ -44,19 +44,19 @@ EspNowRelay NowRelay;
 enum
 {
   TASK_TEMP = 0,
-  TASK_CO2,
+  //TASK_CO2,
   TASK_PM,
   TASK_BATT_LEVEL,
   TASK_COUNT
 };
 RTC_DATA_ATTR Task Tasks[TASK_COUNT];
 
-void TurnOnCO2()
-{
-  DebugPrintf("+++++++ Starting to heat CO2 +++++++\n");
-  digitalWrite(CO2_SWITCH, HIGH);
-  co2.ResetPreheatTime();
-}
+// void TurnOnCO2()
+// {
+//   DebugPrintf("+++++++ Starting to heat CO2 +++++++\n");
+//   digitalWrite(CO2_SWITCH, HIGH);
+//   co2.ResetPreheatTime();
+// }
 
 void TurnOnPMS()
 {
@@ -110,25 +110,25 @@ bool DoTaskPM(int state, PMData& data)
   return false;
 }
 
-bool DoTaskCO2(int state, CO2Data& data)
-{
-  if (state == 1) //start warmup
-  {
-    TurnOnCO2();
-    return false;
-  }
-  if (state == 2) //take reading
-  {
-    DebugPrintf(" ----- Taking CO2 Reading -----\n");
-    int co2Reading = co2.GetCO2();
-    digitalWrite(CO2_SWITCH, LOW);
-    DebugPrintf(" ========= CO2: %d\n", co2Reading);
-    data.m_PPM = co2Reading;
-    return true;
-  }
+// bool DoTaskCO2(int state, CO2Data& data)
+// {
+//   if (state == 1) //start warmup
+//   {
+//     TurnOnCO2();
+//     return false;
+//   }
+//   if (state == 2) //take reading
+//   {
+//     DebugPrintf(" ----- Taking CO2 Reading -----\n");
+//     int co2Reading = co2.GetCO2();
+//     digitalWrite(CO2_SWITCH, LOW);
+//     DebugPrintf(" ========= CO2: %d\n", co2Reading);
+//     data.m_PPM = co2Reading;
+//     return true;
+//   }
 
-  return false;
-}
+//   return false;
+// }
 
 bool DoTaskBattLevel(int state, BatteryData& data)
 {
@@ -172,16 +172,16 @@ void ExecuteTasks()
         }
         break;
       }
-      case TASK_CO2:
-      {
-        CO2Data* data = (CO2Data*)ptr;
-        if (DoTaskCO2(result, *data))
-        {
-          ptr += sizeof(CO2Data);
-          wh->m_DataIncluded |= WEATHER_CO2_BIT;
-        }
-        break;
-      }
+      // case TASK_CO2:
+      // {
+      //   CO2Data* data = (CO2Data*)ptr;
+      //   if (DoTaskCO2(result, *data))
+      //   {
+      //     ptr += sizeof(CO2Data);
+      //     wh->m_DataIncluded |= WEATHER_CO2_BIT;
+      //   }
+      //   break;
+      // }
       case TASK_PM:
       {
         PMData* data = (PMData*)ptr;
@@ -218,13 +218,6 @@ void ExecuteTasks()
       NowRelay.Send(sock, out, packetLen);
       NowRelay.Close(sock);
     }
-    sock = NowRelay.Connect(*((unsigned int*)PiAddr), IngestPort);
-    Serial.printf("Connect to pi returned %d\n", sock);
-    if (sock >= 0)
-    {
-      NowRelay.Send(sock, out, packetLen);
-      NowRelay.Close(sock);
-    }
   }
 }
 
@@ -236,7 +229,7 @@ void ActualSetup()
   //maybe real data starts coming in after 1:20 (80s)
   //no change at 3:00
   //long cool down vs short cooldown seems to make no difference in behavior
-  TaskInit(Tasks[TASK_CO2],  30 * 60 * 1000, 182 * 1000);
+  //TaskInit(Tasks[TASK_CO2],  30 * 60 * 1000, 182 * 1000);
   TaskInit(Tasks[TASK_PM],   10 * 60 * 1000, 5      * 1000);
   TaskInit(Tasks[TASK_BATT_LEVEL], 1 * 60 * 1000, 0);
 
@@ -272,7 +265,7 @@ void ActualSetup()
   }
 
   //turn on sensors to start
-  TurnOnCO2();
+  //TurnOnCO2();
   TurnOnPMS();
 }
 
@@ -314,7 +307,7 @@ void setup()
   {
     ActualSetup();
   }
-  DebugPrintf("Next CO2 time = %u, next PM time = %u\n", TaskGetNextEventTime(Tasks[TASK_CO2]), TaskGetNextEventTime(Tasks[TASK_PM]));
+  //DebugPrintf("Next CO2 time = %u, next PM time = %u\n", TaskGetNextEventTime(Tasks[TASK_CO2]), TaskGetNextEventTime(Tasks[TASK_PM]));
 
   DebugPrint("Nothing to do for MHZ-19 CO2 sensor!\n");
   DebugPrint("Sensors initialized!\n");
