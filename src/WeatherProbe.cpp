@@ -3,7 +3,6 @@
 #include <SPI.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME280.h>
-#include "mhz19.h"
 #include <PMserial.h> // Arduino library for PM sensors with serial interface
 #include "debug.h"
 #include "MyTime.h"
@@ -14,18 +13,9 @@
 
 unsigned char RelayMAC[6] = {0xC8, 0xC9, 0xA3, 0xD2, 0x9D, 0xC8};
 unsigned char BrainAddr[4] = {192, 168, 1, 222};
-unsigned char PiAddr[4] = {192, 168, 1, 135}; //maybe? might be wrong
 
 const unsigned short IngestPort = 7777;
 
-
-//MHZ-19 CO2 sensor
-#define CO2_PWM 33
-#define CO2_SWITCH 26
-#define CO2_RX 35
-#define CO2_TX 25
-//MHZ19 co2(CO2_PWM, GetTimeMS);
-MHZ19 co2(CO2_RX, CO2_TX, GetTimeMS);
 
 //PMS7003 PMS sensor
 constexpr auto PMS_RX = 16;
@@ -38,6 +28,7 @@ RTC_DATA_ATTR bool PMSStabalizing;
 Adafruit_BME280 bme; // I2C, 22 = SCL, 21 = SDA
 
 #define BATT_LEVEL_PIN 36
+
 
 EspNowRelay NowRelay;
 
@@ -275,7 +266,6 @@ void setup()
   Serial.begin(115200);
 
   //setup pings
-  pinMode(CO2_SWITCH, OUTPUT);
   pinMode(PMS_SWITCH, OUTPUT);
   pinMode(BATT_LEVEL_PIN, INPUT_PULLUP);
 
@@ -309,7 +299,6 @@ void setup()
   }
   //DebugPrintf("Next CO2 time = %u, next PM time = %u\n", TaskGetNextEventTime(Tasks[TASK_CO2]), TaskGetNextEventTime(Tasks[TASK_PM]));
 
-  DebugPrint("Nothing to do for MHZ-19 CO2 sensor!\n");
   DebugPrint("Sensors initialized!\n");
 }
 
