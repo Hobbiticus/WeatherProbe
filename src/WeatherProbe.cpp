@@ -60,6 +60,9 @@ bool DoTaskTemp(int state, TemperatureData& data)
 {
   if (state == 2)
   {
+    DebugPrintf("sensor id: %u\n", bme.sensorID());
+    if (bme.sensorId() == 0)
+      return false;
     float temp = bme.readTemperature();
     float humid = bme.readHumidity();
     float pressure = bme.readPressure();
@@ -125,11 +128,62 @@ bool DoTaskBattLevel(int state, BatteryData& data)
 {
   if (state == 2) //take reading
   {
-    int reading = analogRead(BATT_LEVEL_PIN);
-    float voltage = reading;
+    //sometimes this reads as 0 when there is definitely voltage here
+    const int NumReadings = 5;
+    //String out;
+
+    int voltages[NumReadings] = {0};
+
+    int readingCount = 0;
+    const int MaxReadings = NumReadings * 20;
+
+    for (int i = 0; i < NumReadings && readingCount < MaxReadings; readingCount++)
+    {
+      int voltage = analogRead(BATT_LEVEL_PIN);
+      //DebugPrint("Reading = " + String(voltage) + "\n");
+      if (voltage != 0)
+      {
+        //out += " " + String(voltage);
+        voltages[i] = voltage;
+        i++;
+      }
+      if (i < NumReadings - 1)
+        //really need to wait a while for this to be accurate for some reason
+        delay(100);
+    }
+    //DebugPrint(out + "\n");
+
+    //sort the voltages (go go gadget bubble sort!)
+    bool sorted = false;
+    while (!sorted)
+    {
+      sorted = true;
+      for (int i = 0; i < NumReadings-1; i++)
+      {
+        if (voltages[i] > voltages[i+1])
+        {
+          sorted = false;
+          int temp = voltages[i];
+          voltages[i] = voltages[i+1];
+          voltages[i+1] = temp;
+          break;
+        }
+      }
+    }
+
+    //drop the top and bottom values and average
+    float rawVoltage = 0;
+    for (int i = 1; i < NumReadings-1; i++)
+      rawVoltage += voltages[i];
+    rawVoltage /= NumReadings - 2;
+
+    Serial.printf("Raw reading = %.3f\n", rawVoltage);
+
+    //int reading = analogRead(BATT_LEVEL_PIN);
+    float voltage = rawVoltage;
     voltage /= 4096.0;
     voltage *= 8.48;
-    DebugPrintf("BATTERY READING = %d -> %.2f Volts\n", reading, voltage);
+    DebugPrintf("BATTERY READING = %d -> %.2f Volts\n", (int)rawVoltage, voltage);
     data.m_Voltage = (unsigned int)(voltage * 100);
     return true;
   }
