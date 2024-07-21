@@ -61,12 +61,15 @@ bool DoTaskTemp(int state, TemperatureData& data)
   if (state == 2)
   {
     DebugPrintf("sensor id: %u\n", bme.sensorID());
-    if (bme.sensorId() == 0)
+    if (bme.sensorID() == 0)
       return false;
     float temp = bme.readTemperature();
     float humid = bme.readHumidity();
     float pressure = bme.readPressure();
     DebugPrintf(" ========= temp = %.2f, humid = %.2f, pressure = %.2f\n", temp, humid, pressure);
+    //sometimes temperature and pressure return anomolous readings (this might be covered with the sensorID check above but this should guarantee it)
+    if (temp == 0 && pressure < 100000.0)
+      return false;
     data.m_Temperature = (short)(temp * 100);
     data.m_Humidity = (unsigned short)(humid * 10);
     data.m_Pressure = (unsigned int)(pressure * 100);
