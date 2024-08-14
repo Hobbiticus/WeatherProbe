@@ -16,6 +16,22 @@ unsigned char BrainAddr[4] = {192, 168, 1, 222};
 
 const unsigned short IngestPort = 7777;
 
+//3 to 2 yields range 0-8.25V, battery should get to max 7.3
+float R1 = 300.0;
+float R2 = 200.0;
+float VIN = 3.3;
+
+//actual voltage, measured voltage
+const int VoltageCalibrationTableSize = 5;
+float VoltageCalibrationTable[VoltageCalibrationTableSize][2] =
+{
+  { 5.5, 5.06 },
+  { 6.0, 5.57 },
+  { 6.5, 6.10 },
+  { 7.0, 6.76 },
+  { 7.5, 7.58 }
+};
+
 
 //PMS7003 PMS sensor
 constexpr auto PMS_RX = 16;
@@ -180,14 +196,44 @@ bool DoTaskBattLevel(int state, BatteryData& data)
       rawVoltage += voltages[i];
     rawVoltage /= NumReadings - 2;
 
-    Serial.printf("Raw reading = %.3f\n", rawVoltage);
+    Serial.print("Raw reading = ");
+    Serial.println(rawVoltage);
 
-    //int reading = analogRead(BATT_LEVEL_PIN);
-    float voltage = rawVoltage;
-    voltage /= 4096.0;
-    voltage *= 8.48;
-    DebugPrintf("BATTERY READING = %d -> %.2f Volts\n", (int)rawVoltage, voltage);
-    data.m_Voltage = (unsigned int)(voltage * 100);
+    float vout = (rawVoltage * VIN) / 4096.0;
+    float vin = vout / (R2 / (R1 + R2));
+    DebugPrint("Meastured voltage = " + String(vin, 2) + String(" V\n"));
+
+    //use the calibration table to get a more accurate voltage reading
+    if (vin < VoltageCalibrationTable[0][1])
+    {
+      //extrapolate down
+      float ratio = VoltageCalibrationTable[0][0] / VoltageCalibrationTable[0][1];
+      vin *= ratio;
+    }
+    else if (vin > VoltageCalibrationTable[VoltageCalibrationTableSize-1][1])
+    {
+      //extrapolate up
+      float ratio = VoltageCalibrationTable[VoltageCalibrationTableSize-1][0] / VoltageCalibrationTable[VoltageCalibrationTableSize-1][1];
+      vin *= ratio;
+    }
+    else
+    {
+      //interpolate!
+      int i = 0;
+      //find where to interpolate
+      for (; i < VoltageCalibrationTableSize - 1; i++)
+      {
+        if (VoltageCalibrationTable[i+1][1] > vin)
+          break;
+      }
+      DebugPrint("Interpolating between " + String(VoltageCalibrationTable[i][1], 2) + " and " + String(VoltageCalibrationTable[i+1][1], 2) + "\n");
+      float ratio = (vin - VoltageCalibrationTable[i][1]) / (VoltageCalibrationTable[i+1][1] - VoltageCalibrationTable[i][1]);
+      vin = (VoltageCalibrationTable[i+1][0] * ratio) + (VoltageCalibrationTable[i][0] * (1 - ratio));
+    }
+    DebugPrint("Actual voltage = " + String(vin, 2) + String(" V\n"));
+
+    DebugPrintf("BATTERY READING = %d -> %.2f Volts\n", (int)rawVoltage, vin);
+    data.m_Voltage = (unsigned int)(vin * 100);
     return true;
   }
   return false;
@@ -322,7 +368,7 @@ void setup()
 {
   Serial.begin(115200);
 
-  //setup pings
+  //setup pins
   pinMode(PMS_SWITCH, OUTPUT);
   pinMode(BATT_LEVEL_PIN, INPUT_PULLUP);
 
