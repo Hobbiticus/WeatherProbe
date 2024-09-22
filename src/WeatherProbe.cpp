@@ -51,9 +51,9 @@ EspNowRelay NowRelay;
 enum
 {
   TASK_TEMP = 0,
+  TASK_BATT_LEVEL,
   //TASK_CO2,
   TASK_PM,
-  TASK_BATT_LEVEL,
   TASK_COUNT
 };
 RTC_DATA_ATTR Task Tasks[TASK_COUNT];
@@ -325,7 +325,7 @@ void ActualSetup()
   //long cool down vs short cooldown seems to make no difference in behavior
   //TaskInit(Tasks[TASK_CO2],  30 * 60 * 1000, 182 * 1000);
   TaskInit(Tasks[TASK_PM],   10 * 60 * 1000, 5      * 1000);
-  TaskInit(Tasks[TASK_BATT_LEVEL], 1 * 60 * 1000, 0);
+  TaskInit(Tasks[TASK_BATT_LEVEL], 2 * 60 * 1000, 0);
 
   {
     unsigned long earliestEvent = TaskGetNextEventTime(Tasks[0]);
