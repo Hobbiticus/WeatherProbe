@@ -17,7 +17,7 @@ unsigned long TaskGetNextEventTime(Task& task)
     switch (task.m_State)
     {
     case Task::SLEEPING:
-        return task.m_LastReadingTime + task.m_ReadingPeriod - task.m_WarmupTime;
+        return task.m_LastReadingTime + task.m_ReadingPeriod;
     case Task::WARMING:
         return task.m_WarmupStartTime + task.m_WarmupTime;
     }
