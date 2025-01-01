@@ -50,8 +50,8 @@ EspNowRelay NowRelay;
 
 enum
 {
-  TASK_TEMP = 0,
-  TASK_BATT_LEVEL,
+  TASK_BATT_LEVEL = 0,
+  TASK_TEMP,
   //TASK_CO2,
   TASK_PM,
   TASK_COUNT
@@ -98,6 +98,7 @@ bool DoTaskPM(int state, PMData& data)
 {
   if (state == 1) //start warmup
   {
+    DebugPrintf(" --- Turning on PM sensor ---\n");
     TurnOnPMS();
     return false;
   }
@@ -148,60 +149,22 @@ bool DoTaskBattLevel(int state, BatteryData& data)
   if (state == 2) //take reading
   {
     //sometimes this reads as 0 when there is definitely voltage here
-    const int NumReadings = 5;
-    //String out;
+    const int MaxReadings = 5;
 
-    int voltages[NumReadings] = {0};
-
-    int readingCount = 0;
-    const int MaxReadings = NumReadings * 20;
-
-    for (int i = 0; i < NumReadings && readingCount < MaxReadings; readingCount++)
+    int analogResult = 0;
+    for (int i = 0; i < MaxReadings && analogResult == 0; i++)
     {
-      int voltage = analogRead(BATT_LEVEL_PIN);
-      //DebugPrint("Reading = " + String(voltage) + "\n");
-      if (voltage != 0)
-      {
-        //out += " " + String(voltage);
-        voltages[i] = voltage;
-        i++;
-      }
-      if (i < NumReadings - 1)
-        //really need to wait a while for this to be accurate for some reason
+      analogResult = analogRead(BATT_LEVEL_PIN);
+      if (analogResult == 0)
         delay(100);
     }
-    //DebugPrint(out + "\n");
-
-    //sort the voltages (go go gadget bubble sort!)
-    bool sorted = false;
-    while (!sorted)
-    {
-      sorted = true;
-      for (int i = 0; i < NumReadings-1; i++)
-      {
-        if (voltages[i] > voltages[i+1])
-        {
-          sorted = false;
-          int temp = voltages[i];
-          voltages[i] = voltages[i+1];
-          voltages[i+1] = temp;
-          break;
-        }
-      }
-    }
-
-    //drop the top and bottom values and average
-    float rawVoltage = 0;
-    for (int i = 1; i < NumReadings-1; i++)
-      rawVoltage += voltages[i];
-    rawVoltage /= NumReadings - 2;
 
     Serial.print("Raw reading = ");
-    Serial.println(rawVoltage);
+    Serial.println(analogResult);
 
-    float vout = (rawVoltage * VIN) / 4096.0;
+    float vout = (analogResult * VIN) / 4096.0;
     float vin = vout / (R2 / (R1 + R2));
-    DebugPrint("Meastured voltage = " + String(vin, 2) + String(" V\n"));
+    DebugPrintf("Meastured voltage = %.2f V\n", vin);
 
     //use the calibration table to get a more accurate voltage reading
     if (vin < VoltageCalibrationTable[0][1])
@@ -226,13 +189,13 @@ bool DoTaskBattLevel(int state, BatteryData& data)
         if (VoltageCalibrationTable[i+1][1] > vin)
           break;
       }
-      DebugPrint("Interpolating between " + String(VoltageCalibrationTable[i][1], 2) + " and " + String(VoltageCalibrationTable[i+1][1], 2) + "\n");
+      DebugPrintf("Interpolating between %.2f and %.2f\n", VoltageCalibrationTable[i][1], VoltageCalibrationTable[i+1][1]);
       float ratio = (vin - VoltageCalibrationTable[i][1]) / (VoltageCalibrationTable[i+1][1] - VoltageCalibrationTable[i][1]);
       vin = (VoltageCalibrationTable[i+1][0] * ratio) + (VoltageCalibrationTable[i][0] * (1 - ratio));
     }
-    DebugPrint("Actual voltage = " + String(vin, 2) + String(" V\n"));
+    DebugPrintf("Actual voltage = %.2f V\n", vin);
 
-    DebugPrintf("BATTERY READING = %d -> %.2f Volts\n", (int)rawVoltage, vin);
+    DebugPrintf("BATTERY READING = %d -> %.2f Volts\n", (int)analogResult, vin);
     data.m_Voltage = (unsigned int)(vin * 100);
     return true;
   }
@@ -248,6 +211,10 @@ void ExecuteTasks()
   wh->m_DataIncluded = 0;
   unsigned char* ptr = (unsigned char*)(wh + 1);
 
+  TemperatureData tempData;
+  PMData pmData;
+  BatteryData battData;
+
   for (int i = 0; i < TASK_COUNT; i++)
   {
     Task& task = Tasks[i];
@@ -258,12 +225,9 @@ void ExecuteTasks()
     {
       case TASK_TEMP:
       {
-        TemperatureData* data = (TemperatureData*)ptr;
-        if (DoTaskTemp(result, *data))
-        {
-          ptr += sizeof(TemperatureData);
+        DebugPrintf("Doing temperature task...\n");
+        if (DoTaskTemp(result, tempData))
           wh->m_DataIncluded |= WEATHER_TEMP_BIT;
-        }
         break;
       }
       // case TASK_CO2:
@@ -278,25 +242,38 @@ void ExecuteTasks()
       // }
       case TASK_PM:
       {
-        PMData* data = (PMData*)ptr;
-        if (DoTaskPM(result, *data))
-        {
-          ptr += sizeof(PMData);
+        DebugPrintf("Doing PM task...\n");
+        if (DoTaskPM(result, pmData))
           wh->m_DataIncluded |= WEATHER_PM_BIT;
-        }
         break;
       }
       case TASK_BATT_LEVEL:
       {
-        BatteryData* data = (BatteryData*)ptr;
-        if (DoTaskBattLevel(result, *data))
-        {
-          ptr += sizeof(BatteryData);
+        DebugPrintf("Doing Battery task...\n");
+        if (DoTaskBattLevel(result, battData))
           wh->m_DataIncluded |= WEATHER_BATT_BIT;
-        }
         break;
       }
     }
+  }
+
+  if (wh->m_DataIncluded & WEATHER_TEMP_BIT)
+  {
+    TemperatureData* data = (TemperatureData*)ptr;
+    *data = tempData;
+    ptr += sizeof(TemperatureData);
+  }
+  if (wh->m_DataIncluded & WEATHER_PM_BIT)
+  {
+    PMData* data = (PMData*)ptr;
+    *data = pmData;
+    ptr += sizeof(PMData);
+  }
+  if (wh->m_DataIncluded & WEATHER_BATT_BIT)
+  {
+    BatteryData* data = (BatteryData*)ptr;
+    *data = battData;
+    ptr += sizeof(BatteryData);
   }
 
   if (wh->m_DataIncluded != 0)
@@ -343,7 +320,7 @@ void ActualSetup()
 
   ExecuteTasks();
 
-  DebugPrint("After initial tick....\n");
+  DebugPrintf("After initial tick....\n");
   {
     unsigned long earliestEvent = TaskGetNextEventTime(Tasks[0]);
     DebugPrintf("Task 0 next at %u\n", earliestEvent);
@@ -377,10 +354,10 @@ void setup()
   NowRelay.Init(RelayMAC);
 
   esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
-  DebugPrint("Wakeup cause = " + String(wakeup_reason) + "\n");
-  DebugPrint("Boot time = " + String(millis()) + "; now = " + String(GetTimeMS()) + "\n");
+  DebugPrintf("Wakeup cause = %d\n", wakeup_reason);
+  DebugPrintf("Boot time = %u; now = %u\n", millis(), GetTimeMS());
 
-  DebugPrint("Starting BME280 temperature/humidity/pressure sensor...\n");
+  DebugPrintf("Starting BME280 temperature/humidity/pressure sensor...\n");
   int status = bme.begin(BME280_ADDRESS_ALTERNATE);  
   // You can also pass in a Wire library object like &Wire2
   if (!status) {
@@ -393,7 +370,7 @@ void setup()
       //while (1) delay(10);
   }
   else{
-    DebugPrint("yay!\n");
+    DebugPrintf("yay!\n");
   }
 
   if (wakeup_reason < 1 || wakeup_reason > 5)
@@ -402,7 +379,7 @@ void setup()
   }
   //DebugPrintf("Next CO2 time = %u, next PM time = %u\n", TaskGetNextEventTime(Tasks[TASK_CO2]), TaskGetNextEventTime(Tasks[TASK_PM]));
 
-  DebugPrint("Sensors initialized!\n");
+  DebugPrintf("Sensors initialized!\n");
 }
 
 void loop()
