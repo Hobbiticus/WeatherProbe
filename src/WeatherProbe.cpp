@@ -25,11 +25,11 @@ float VIN = 3.3;
 const int VoltageCalibrationTableSize = 5;
 float VoltageCalibrationTable[VoltageCalibrationTableSize][2] =
 {
-  { 5.5, 5.06 },
-  { 6.0, 5.57 },
-  { 6.5, 6.10 },
-  { 7.0, 6.76 },
-  { 7.5, 7.58 }
+  { 5.5, 5.01 },
+  { 6.0, 5.52 },
+  { 6.5, 6.05 },
+  { 7.0, 6.69 },
+  { 7.5, 7.50 }
 };
 
 
@@ -350,6 +350,14 @@ void setup()
   pinMode(BATT_LEVEL_PIN, INPUT_PULLUP);
 
   DebugInit();
+
+  // for calibrating the battery voltage measurement...
+  // BatteryData data;
+  // while (true)
+  // {
+  //   DoTaskBattLevel(2, data);
+  //   delay(1000);
+  // }
 
   NowRelay.Init(RelayMAC);
 
