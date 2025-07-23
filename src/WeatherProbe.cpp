@@ -2,7 +2,9 @@
 #include <Wire.h>
 #include <SPI.h>
 #include <Adafruit_Sensor.h>
-#include <Adafruit_BME280.h>
+#include <Adafruit_BMP280.h>
+#include <Wire.h>
+#include "Adafruit_SHT31.h"
 #include <PMserial.h> // Arduino library for PM sensors with serial interface
 #include "debug.h"
 #include "MyTime.h"
@@ -10,6 +12,11 @@
 #include "EspNowRelay.h"
 #include "../../CentralBrain/include/IngestProtocol.h"
 #include "../../CentralBrain/include/WeatherProtocol.h"
+
+//BMP280 pressure sensor
+Adafruit_BMP280 bmp;
+//SHT31 temerature/humidity sensor
+Adafruit_SHT31 sht31 = Adafruit_SHT31();
 
 unsigned char RelayMAC[6] = {0xC8, 0xC9, 0xA3, 0xD2, 0x9D, 0xC8};
 unsigned char BrainAddr[4] = {192, 168, 1, 222};
@@ -40,8 +47,6 @@ constexpr auto PMS_TX = 17;
 SerialPM pms(PMS7003, PMS_RX, PMS_TX); // PMSx003, RX, TX
 RTC_DATA_ATTR bool PMSStabalizing;
 
-//BME280 temperature/humidity/pressure sensor
-Adafruit_BME280 bme; // I2C, 22 = SCL, 21 = SDA
 
 #define BATT_LEVEL_PIN 36
 
@@ -76,16 +81,16 @@ bool DoTaskTemp(int state, TemperatureData& data)
 {
   if (state == 2)
   {
-    DebugPrintf("sensor id: %u\n", bme.sensorID());
-    if (bme.sensorID() == 0)
+    DebugPrintf("sensor id: %u\n", bmp.sensorID());
+    if (bmp.sensorID() == 0)
       return false;
-    float temp = bme.readTemperature();
-    float humid = bme.readHumidity();
-    float pressure = bme.readPressure();
+    float temp = sht31.readTemperature(); //celcius
+    float humid = sht31.readHumidity();   // %
+    float pressure = bmp.readPressure();  // Pa
     DebugPrintf(" ========= temp = %.2f, humid = %.2f, pressure = %.2f\n", temp, humid, pressure);
-    //sometimes temperature and pressure return anomolous readings (this might be covered with the sensorID check above but this should guarantee it)
-    if (temp == 0 && pressure < 100000.0)
-      return false;
+    // //sometimes temperature and pressure return anomolous readings (this might be covered with the sensorID check above but this should guarantee it)
+    // if (temp == 0 && pressure < 100000.0)
+    //   return false;
     data.m_Temperature = (short)(temp * 100);
     data.m_Humidity = (unsigned short)(humid * 10);
     data.m_Pressure = (unsigned int)(pressure * 100);
@@ -365,12 +370,10 @@ void setup()
   DebugPrintf("Wakeup cause = %d\n", wakeup_reason);
   DebugPrintf("Boot time = %u; now = %u\n", millis(), GetTimeMS());
 
-  DebugPrintf("Starting BME280 temperature/humidity/pressure sensor...\n");
-  int status = bme.begin(BME280_ADDRESS_ALTERNATE);  
-  // You can also pass in a Wire library object like &Wire2
-  if (!status) {
+  DebugPrintf("Starting BMP280 pressure sensor...\n");
+  if (!bmp.begin()) {
       DebugPrint("Could not find a valid BME280 sensor, check wiring, address, sensor ID!\n");
-      Serial.print("SensorID was: 0x"); Serial.println(bme.sensorID(),16);
+      Serial.print("SensorID was: 0x"); Serial.println(bmp.sensorID(),16);
       Serial.print("        ID of 0xFF probably means a bad address, a BMP 180 or BMP 085\n");
       Serial.print("   ID of 0x56-0x58 represents a BMP 280,\n");
       Serial.print("        ID of 0x60 represents a BME 280.\n");
@@ -379,6 +382,17 @@ void setup()
   }
   else{
     DebugPrintf("yay!\n");
+    /* Default settings from datasheet. */
+    bmp.setSampling(Adafruit_BMP280::MODE_FORCED,     /* Operating Mode. */
+                    Adafruit_BMP280::SAMPLING_X2,     /* Temp. oversampling */
+                    Adafruit_BMP280::SAMPLING_X16,    /* Pressure oversampling */
+                    Adafruit_BMP280::FILTER_X16,      /* Filtering. */
+                    Adafruit_BMP280::STANDBY_MS_500); /* Standby time. */
+  }
+
+  DebugPrintf("Starting SHT31 temperature/humidity sensor...\n");
+  if (! sht31.begin(0x44)) {
+    DebugPrint("Couldn't find SHT31\n");
   }
 
   if (wakeup_reason < 1 || wakeup_reason > 5)
