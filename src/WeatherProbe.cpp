@@ -128,6 +128,11 @@ bool DoTaskBattLevel(int state, BatteryData& data)
 {
   if (state == 2) //take reading
   {
+    if (!INA.isConnected())
+    {
+      DebugPrintf("[!] Not connected to INA236\n");
+      return false;
+    }
     float voltage = INA.getBusVoltage();
     float current = INA.getCurrent();
 
