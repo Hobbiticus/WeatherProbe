@@ -63,7 +63,7 @@ void TurnOnPMS()
   pms.init();
 }
 
-bool DoTaskTemp(int state, TemperatureData& data)
+bool DoTaskTemp(int state, TemperatureData& data, unsigned char& bitsIncluded)
 {
   if (state == 2)
   {
@@ -75,6 +75,22 @@ bool DoTaskTemp(int state, TemperatureData& data)
     float humid = sht31.readHumidity();   // %
     float pressure = bmp.readPressure();  // Pa
     DebugPrintf(" ========= temp = %.2f, humid = %.2f, pressure = %.2f\n", temp, humid, pressure);
+    //validate for wonky readings
+    if (temp != NAN && temp != 0)
+    {
+      bitsIncluded |= WEATHER_TEMP_ONLY_BIT;
+      data.m_Temperature = (short)(temp * 100);
+    }
+    if (humid != NAN)
+    {
+      bitsIncluded |= WEATHER_HUMID_BIT;
+      data.m_Humidity = (unsigned short)(humid * 10);
+    }
+    if (pressure != NAN && pressure < 118524 && pressure > 84659)
+    {
+      bitsIncluded |= WEATHER_PRESSURE_BIT;
+      data.m_Pressure = (unsigned int)(pressure * 100);
+    }
     //not sure if this ever happens, but hopefully this will prevent wonky readings
     if (temp == NAN || humid == NAN)
     {
@@ -86,9 +102,17 @@ bool DoTaskTemp(int state, TemperatureData& data)
       DebugPrintf("Pressure is NAN\n");
       return false;
     }
-    data.m_Temperature = (short)(temp * 100);
-    data.m_Humidity = (unsigned short)(humid * 10);
-    data.m_Pressure = (unsigned int)(pressure * 100);
+    if (pressure > 118524) //35 inhg
+    {
+      DebugPrintf("  [!] Pressure is too high\n");
+      return false;
+    }
+    if (pressure < 84659) //25 inhg
+    {
+      DebugPrintf("  [!] Pressure is to low\n");
+      return false;
+    }
+
     return true;
   }
   return false;
@@ -136,7 +160,12 @@ bool DoTaskBattLevel(int state, BatteryData& data)
     float voltage = INA.getBusVoltage();
     float current = INA.getCurrent();
 
-    DebugPrintf("BATTERY READING = %.2f Volts, %.3f Amps\n", voltage, current);
+    DebugPrintf(" ========= BATTERY READING = %.2f Volts, %.3f Amps\n", voltage, current);
+    if (voltage == 0)
+    {
+      DebugPrintf("No voltage?\n");
+      return false;
+    }
     data.m_Voltage = (unsigned int)(voltage * 100);
     return true;
   }
@@ -167,7 +196,7 @@ void ExecuteTasks()
       case TASK_TEMP:
       {
         DebugPrintf("Doing temperature task...\n");
-        if (DoTaskTemp(result, tempData))
+        if (DoTaskTemp(result, tempData, wh->m_DataIncluded))
           wh->m_DataIncluded |= WEATHER_TEMP_BIT;
         break;
       }
