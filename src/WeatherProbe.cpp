@@ -63,56 +63,38 @@ void TurnOnPMS()
   pms.init();
 }
 
-bool DoTaskTemp(int state, TemperatureData& data, unsigned char& bitsIncluded)
+bool DoTaskTemp(int state, TemperatureData& tempData, HumidityData& humidData, PressureData& pressureData, unsigned char& bitsIncluded)
 {
   if (state == 2)
   {
     DebugPrintf("sensor id: %u\n", bmp.sensorID());
-    if (bmp.sensorID() == 0)
-      return false;
     
-    float temp = sht31.readTemperature(); //celcius
-    float humid = sht31.readHumidity();   // %
+    float temp = NAN, humid = NAN; //celcius, %
+    bool success = sht31.readBoth(&temp, &humid);
+    if (!success)
+    {
+      DebugPrintf("  [!] Failed to read temp/humidity\n");
+      temp = NAN;
+      humid = NAN;
+    }
     float pressure = bmp.readPressure();  // Pa
     DebugPrintf(" ========= temp = %.2f, humid = %.2f, pressure = %.2f\n", temp, humid, pressure);
     //validate for wonky readings
-    if (temp != NAN && temp != 0)
+    if (!isnan(temp))
     {
-      bitsIncluded |= WEATHER_TEMP_ONLY_BIT;
-      data.m_Temperature = (short)(temp * 100);
+      bitsIncluded |= WEATHER_TEMPERATURE_BIT;
+      tempData.m_Temperature = (short)(temp * 100);
     }
-    if (humid != NAN)
+    if (!isnan(humid))
     {
       bitsIncluded |= WEATHER_HUMIDITY_BIT;
-      data.m_Humidity = (unsigned short)(humid * 10);
+      humidData.m_Humidity = (unsigned short)(humid * 10);
     }
-    if (pressure != NAN && pressure < 118524 && pressure > 84659)
+    if (bmp.sensorID() != 0 && !isnan(pressure) && pressure < 118524 && pressure > 84659)
     {
       bitsIncluded |= WEATHER_PRESSURE_BIT;
-      data.m_Pressure = (unsigned int)(pressure * 100);
+      pressureData.m_Pressure = (unsigned int)(pressure * 100);
     }
-    //not sure if this ever happens, but hopefully this will prevent wonky readings
-    if (temp == NAN || humid == NAN)
-    {
-      DebugPrintf("Temp or humidity is NAN\n");
-      return false;
-    }
-    if (pressure == NAN)
-    {
-      DebugPrintf("Pressure is NAN\n");
-      return false;
-    }
-    if (pressure > 118524) //35 inhg
-    {
-      DebugPrintf("  [!] Pressure is too high\n");
-      return false;
-    }
-    if (pressure < 84659) //25 inhg
-    {
-      DebugPrintf("  [!] Pressure is to low\n");
-      return false;
-    }
-
     return true;
   }
   return false;
@@ -183,6 +165,8 @@ void ExecuteTasks()
   unsigned char* ptr = (unsigned char*)(wh + 1);
 
   TemperatureData tempData;
+  HumidityData humidData;
+  PressureData pressureData;
   PMData pmData;
   BatteryData battData;
 
@@ -197,8 +181,7 @@ void ExecuteTasks()
       case TASK_TEMP:
       {
         DebugPrintf("Doing temperature task...\n");
-        if (DoTaskTemp(result, tempData, wh->m_DataIncluded))
-          wh->m_DataIncluded |= WEATHER_TEMP_BIT;
+        DoTaskTemp(result, tempData, humidData, pressureData, wh->m_DataIncluded);
         break;
       }
       case TASK_PM:
@@ -218,11 +201,23 @@ void ExecuteTasks()
     }
   }
 
-  if (wh->m_DataIncluded & WEATHER_TEMP_BIT)
+  if (wh->m_DataIncluded & WEATHER_TEMPERATURE_BIT)
   {
     TemperatureData* data = (TemperatureData*)ptr;
     *data = tempData;
     ptr += sizeof(TemperatureData);
+  }
+  if (wh->m_DataIncluded & WEATHER_HUMIDITY_BIT)
+  {
+    HumidityData* data = (HumidityData*)ptr;
+    *data = humidData;
+    ptr += sizeof(HumidityData);
+  }
+  if (wh->m_DataIncluded & WEATHER_PRESSURE_BIT)
+  {
+    PressureData* data = (PressureData*)ptr;
+    *data = pressureData;
+    ptr += sizeof(PressureData);
   }
   if (wh->m_DataIncluded & WEATHER_PM_BIT)
   {
@@ -236,25 +231,6 @@ void ExecuteTasks()
     *data = battData;
     ptr += sizeof(BatteryData);
   }
-  if (wh->m_DataIncluded & WEATHER_TEMP_ONLY_BIT)
-  {
-    TempData* data = (TempData*)ptr;
-    data->m_Temperature = tempData.m_Temperature;
-    ptr += sizeof(TempData);
-  }
-  if (wh->m_DataIncluded & WEATHER_HUMIDITY_BIT)
-  {
-    HumidityData* data = (HumidityData*)ptr;
-    data->m_Humidity = tempData.m_Humidity;
-    ptr += sizeof(HumidityData);
-  }
-  if (wh->m_DataIncluded & WEATHER_TEMP_ONLY_BIT)
-  {
-    PressureData* data = (PressureData*)ptr;
-    data->m_Pressure = tempData.m_Pressure;
-    ptr += sizeof(PressureData);
-  }
-
 
   if (wh->m_DataIncluded != 0)
   {
