@@ -167,6 +167,7 @@ bool DoTaskBattLevel(int state, BatteryData& data)
       return false;
     }
     data.m_Voltage = (unsigned int)(voltage * 100);
+    data.m_Milliamps = (int)(current * 1000);
     return true;
   }
   return false;
