@@ -83,7 +83,7 @@ bool DoTaskTemp(int state, TemperatureData& data, unsigned char& bitsIncluded)
     }
     if (humid != NAN)
     {
-      bitsIncluded |= WEATHER_HUMID_BIT;
+      bitsIncluded |= WEATHER_HUMIDITY_BIT;
       data.m_Humidity = (unsigned short)(humid * 10);
     }
     if (pressure != NAN && pressure < 118524 && pressure > 84659)
@@ -235,6 +235,25 @@ void ExecuteTasks()
     *data = battData;
     ptr += sizeof(BatteryData);
   }
+  if (wh->m_DataIncluded & WEATHER_TEMP_ONLY_BIT)
+  {
+    TempData* data = (TempData*)ptr;
+    data->m_Temperature = tempData.m_Temperature;
+    ptr += sizeof(TempData);
+  }
+  if (wh->m_DataIncluded & WEATHER_HUMIDITY_BIT)
+  {
+    HumidityData* data = (HumidityData*)ptr;
+    data->m_Humidity = tempData.m_Humidity;
+    ptr += sizeof(HumidityData);
+  }
+  if (wh->m_DataIncluded & WEATHER_TEMP_ONLY_BIT)
+  {
+    PressureData* data = (PressureData*)ptr;
+    data->m_Pressure = tempData.m_Pressure;
+    ptr += sizeof(PressureData);
+  }
+
 
   if (wh->m_DataIncluded != 0)
   {
